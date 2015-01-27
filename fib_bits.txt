@@ -30,16 +30,16 @@ fcPlcfSea
 lcbPlcfSea
 fcSttbfFfn
 lcbSttbfFfn
-fcPlcfFldMom
-lcbPlcfFldMom *size Main doc 33 * 4 + 154 = 286
-fcPlcfFldHdr *
-lcbPlcfFldHdr * size Header doc
-fcPlcfFldFtn
-lcbPlcfFldFtn * size Footnote doc
-fcPlcfFldAtn
-lcbPlcfFldAtn * size Comment doc
-fcPlcfFldMcr
-lcbPlcfFldMcr 
+fcPlcfFldMom * offset of main doc fields. Note: could use this to dig further
+lcbPlcfFldMom * size of main doc fields (offset calculated by 33 * 4 + 154 = 286)
+fcPlcfFldHdr * offset of header/footer fields
+lcbPlcfFldHdr * size header/footer fields
+fcPlcfFldFtn * offset of footnote fields
+lcbPlcfFldFtn * size footnote fields
+fcPlcfFldAtn  * offset of comment fields
+lcbPlcfFldAtn * size comment fields
+fcPlcfFldMcr * not used
+lcbPlcfFldMcr * not used
 fcSttbfBkmk
 lcbSttbfBkmk
 fcPlcfBkf

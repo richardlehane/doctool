@@ -21,7 +21,6 @@ import (
 	"encoding/binary"
 	"flag"
 	"fmt"
-	"io"
 	"log"
 	"os"
 
@@ -34,44 +33,43 @@ func process(in string) error {
 		return err
 	}
 	defer file.Close()
-
 	doc, err := mscfb.New(file)
 	if err != nil {
-		return err
+		return err // not an OLE file?
 	}
-	for {
-		entry, err := doc.Next()
-		if err == io.EOF {
-			break
-		}
-		if err != nil {
-			return err
-		}
-
+	for entry, err := doc.Next(); err == nil; entry, err = doc.Next() { // iterate through entries of OLE document
 		if entry.Name == "WordDocument" {
-			fib := make([]byte, 320)
+			fib := make([]byte, 314)
 			i, _ := entry.Read(fib)
-			if i < 320 {
+			if i < 314 {
 				return nil
 			}
-			var mn, hdr, ftn, com uint32
-			mn = binary.LittleEndian.Uint32(fib[286:290])
-			hdr = binary.LittleEndian.Uint32(fib[294:298])
-			ftn = binary.LittleEndian.Uint32(fib[302:306])
-			com = binary.LittleEndian.Uint32(fib[310:314])
-			fmt.Printf("Field size of main doc: %d\nField size of header section: %d\nField size of footnote section: %d\nField size of comment section: %d\n", mn, hdr, ftn, com)
+			// we only care about first 314 bytes of the WordDocument stream.
+			// The File Information Block (FIB) starts at 0 offset. The FibRgFcLcb97 section of the FIB starts 154 bytes in.
+			// All the items in the FibRgFcLcb97 are listed in the fib_bits.txt doc in this repo. They are each 4 bytes long.
+			// You can calculate the relevant offsets by looking at the place of these items in the fib_bits.txt list.
+			mn := binary.LittleEndian.Uint32(fib[286:290]) // Interpret the bytes as an unsigned 32-bit integer in little endian order
+			hdr := binary.LittleEndian.Uint32(fib[294:298])
+			ftn := binary.LittleEndian.Uint32(fib[302:306])
+			com := binary.LittleEndian.Uint32(fib[310:314])
+			fmt.Printf("Field size of main doc: %d\n"+
+				"Field size of header/footer section: %d\n"+
+				"Field size of footnote section: %d\n"+
+				"Field size of comment section: %d\n",
+				mn, hdr, ftn, com)
+			return nil // found what we are looking for, can finish here
 		}
 	}
-	return nil
+	return nil // didn't find a WordDocument stream
 }
 
 func main() {
-	flag.Parse()
+	flag.Parse() // we don't actually use any flags in this script, I just copied this from another file (comdump)! Left in in case add flags in future
 	ins := flag.Args()
 	if len(ins) < 1 {
-		log.Fatalln("Missing required argument: path_to_compound_object")
+		log.Fatalln("Missing required argument: path to a word document")
 	}
-	for _, in := range ins {
+	for _, in := range ins { // you can process a bunch of files at once by using: ./doctool doc1.doc doc2.doc doc3.doc etc.
 		err := process(in)
 		if err != nil {
 			log.Fatalln(err)
