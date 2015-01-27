@@ -19,10 +19,12 @@ package main
 
 import (
 	"encoding/binary"
+	"errors"
 	"flag"
 	"fmt"
 	"log"
 	"os"
+	"strings"
 
 	"github.com/richardlehane/mscfb"
 )
@@ -33,21 +35,43 @@ const (
 	TAB1
 )
 
-// start of a func, just a stub
+var (
+	ErrNoFields error = errors.New("No fields")
+	ErrFibShort error = errors.New("file information block too short")
+	ErrTable    error = errors.New("cannot find table stream")
+)
+
+func wrapError(e error) error {
+	return errors.New("Error processing file: " + e.Error())
+}
+
+// this bitwise op is necessary because only 5 of the 8 bits of the byte are significant
+func matchField(a, b byte) bool {
+	return a&0x7F == b
+}
+
+// process the field data by looking for the start of fields and extracting field names (see fieldnames.go)
 func processField(b []byte) string {
+	var strs []string
 	numDataElements := (len(b) - 4) / 6
-	return fmt.Sprintf("%d", numDataElements)
+	ignore := numDataElements*4 + 4 // igore the CP section of the field data
+	for i := 0; i < numDataElements; i = i + 2 {
+		if matchField(b[ignore+i], 0x13) { // check if one of the pairs is the start of a field (0x13)
+			strs = append(strs, fieldNames[b[ignore+i+1]])
+		}
+	}
+	return strings.Join(strs, ", ")
 }
 
 func process(in string) error {
 	file, err := os.Open(in)
 	if err != nil {
-		return err
+		return wrapError(err)
 	}
 	defer file.Close()
 	doc, err := mscfb.New(file)
 	if err != nil {
-		return err // not an OLE file?
+		return wrapError(err) // not an OLE file?
 	}
 	var table, table1, table0, wordDoc *mscfb.File
 	whichTable := UNSET
@@ -71,7 +95,7 @@ func process(in string) error {
 			fib = make([]byte, 634)
 			i, _ := wordDoc.Read(fib)
 			if i < 634 {
-				return nil // fib is not long enough
+				return wrapError(ErrFibShort) // fib is not long enough
 			}
 			byt := fib[11]
 			whichTable = int(byt>>1&1) + 1 // set which table (0Table or 1Table) is the table stream. Do this because a doc can have both but only one will be referenced. It marked by a single bit within the llth byte of the header.
@@ -83,15 +107,15 @@ func process(in string) error {
 	// set the table to either 0Table or 1Table stream
 	switch whichTable {
 	case UNSET:
-		return nil
+		return wrapError(ErrTable)
 	case TAB0:
 		if table0 == nil {
-			return nil
+			return wrapError(ErrTable)
 		}
 		table = table0
 	case TAB1:
 		if table1 == nil {
-			return nil
+			return wrapError(ErrTable)
 		}
 		table = table1
 	}
@@ -106,52 +130,45 @@ func process(in string) error {
 	txbo, txb := binary.LittleEndian.Uint32(fib[618:622]), binary.LittleEndian.Uint32(fib[622:626])
 	htxo, htx := binary.LittleEndian.Uint32(fib[626:630]), binary.LittleEndian.Uint32(fib[630:634])
 	if mn+hdr+ftn+com+end+txb+htx == 0 {
-		return nil // no fields
+		return ErrNoFields // no fields
 	}
 	tableBuf := make([]byte, int(table.Size)) // read all the Table stream into a byte buffer
 	table.Read(tableBuf)
-	// now for each offset and length pair, print the relevant bytes from the table stream (after checking that don't overflow bounds of that slice)
+	// now for each offset and length pair, process the relevant bytes from the table stream (after checking that don't overflow bounds of that slice)
 	if mn > 0 {
-		if int(mo+mn) > len(tableBuf) {
-			return nil
+		if int(mo+mn) <= len(tableBuf) {
+			fmt.Printf("Document body fields: %s\n", processField(tableBuf[int(mo):int(mo+mn)]))
 		}
-		fmt.Printf("Main field data: %v\n", tableBuf[int(mo):int(mo+mn)])
 	}
 	if hdr > 0 {
-		if int(hdro+hdr) > len(tableBuf) {
-			return nil
+		if int(hdro+hdr) <= len(tableBuf) {
+			fmt.Printf("Header/footer fields: %s\n", processField(tableBuf[int(hdro):int(hdro+hdr)]))
 		}
-		fmt.Printf("Header/footer field data: %v\n", tableBuf[int(hdro):int(hdro+hdr)])
 	}
 	if ftn > 0 {
-		if int(ftno+ftn) > len(tableBuf) {
-			return nil
+		if int(ftno+ftn) <= len(tableBuf) {
+			fmt.Printf("Footnote fields: %s\n", processField(tableBuf[int(ftno):int(ftno+ftn)]))
 		}
-		fmt.Printf("Footnote field data: %v\n", tableBuf[int(ftno):int(ftno+ftn)])
 	}
 	if com > 0 {
-		if int(como+com) > len(tableBuf) {
-			return nil
+		if int(como+com) <= len(tableBuf) {
+			fmt.Printf("Comment fields: %s\n", processField(tableBuf[int(como):int(como+com)]))
 		}
-		fmt.Printf("Comment field data: %v\n", tableBuf[int(como):int(como+com)])
 	}
 	if end > 0 {
-		if int(endo+end) > len(tableBuf) {
-			return nil
+		if int(endo+end) <= len(tableBuf) {
+			fmt.Printf("Endnote fields: %s\n", processField(tableBuf[int(endo):int(endo+end)]))
 		}
-		fmt.Printf("Endnote field data: %v\n", tableBuf[int(endo):int(endo+end)])
 	}
 	if txb > 0 {
-		if int(txbo+txb) > len(tableBuf) {
-			return nil
+		if int(txbo+txb) <= len(tableBuf) {
+			fmt.Printf("Textbox fields: %s\n", processField(tableBuf[int(txbo):int(txbo+txb)]))
 		}
-		fmt.Printf("Textbox field data: %v\n", tableBuf[int(txbo):int(txbo+txb)])
 	}
 	if htx > 0 {
-		if int(htxo+htx) > len(tableBuf) {
-			return nil
+		if int(htxo+htx) <= len(tableBuf) {
+			fmt.Printf("Header/footer textbox fields: %s\n", processField(tableBuf[int(htxo):int(htxo+htx)]))
 		}
-		fmt.Printf("Header/footer textbox field data: %v\n", tableBuf[int(htxo):int(htxo+htx)])
 	}
 	return nil
 }
@@ -163,9 +180,10 @@ func main() {
 		log.Fatalln("Missing required argument: path to a word document")
 	}
 	for _, in := range ins { // you can process a bunch of files at once by using: ./doctool doc1.doc doc2.doc doc3.doc etc.
+		fmt.Println(in) // print the file name
 		err := process(in)
 		if err != nil {
-			log.Fatalln(err)
+			fmt.Println(err)
 		}
 	}
 }
